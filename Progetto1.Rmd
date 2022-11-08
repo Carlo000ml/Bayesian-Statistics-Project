@@ -1,0 +1,200 @@
+#### fino alla riga 87 non fare andare niente!
+
+## IMPORT DATASET AND PRIME ANALISI
+```{r}
+library(progress)
+library(tidyverse)
+```
+
+```{r}
+```
+
+
+```{r}
+tfidf <- read.csv('dataset/tfidf.csv')
+```
+
+
+```{r}
+data.label <- tfidf[,17095]
+data.n <- tfidf[,-c(1,17095)]
+#tf <- read.csv('dataset/tf.csv')
+```
+
+## DIMENSIONALITY REDUCTION IN A NAIVE WAY
+Tolgo tutte quelle colonne che hanno meno di 125 valori diversi da zero ()
+```{r}
+whi <- rep(0, 17093)
+for (j in 1:17093) {
+  if (sum (as.vector(data.n[,j] == 0)) < 1850 ) {
+    whi[j] <- 1
+  }
+    
+}
+```
+Ho creato un vettore whi che contiene degli 1 in corrispondenza delle colonne che voglio tenere
+```{r}
+length(which(whi == 1))
+data.numeric <- data.n[, which(whi == 1)]
+```
+
+##PROVO A FARE DIRETTAMENTE REGRESSIONE SUL DATASET CON 127 COVARIATE
+
+```{r}
+library(MCMCpack)
+```
+Preparo le matrici
+```{r}
+Y <- data.label
+X <- (cbind(1,data.numeric))
+X <- as.matrix(X)
+```
+Fisso la prior su beta
+```{r}
+beta00=rep(0, dim(data.numeric)[2]) 
+c0=50 #la prior ha un peso dell'1% rispetto al campione
+```
+Faccio andare il modello PROBIT 
+```{r}
+P0=t(X)%*%X/c0
+
+bfit <- MCMCprobit(Y ~ as.matrix(data.numeric), b0=beta00, B0=P0,marginal.likelihood="Chib95")
+```
+```{r}
+bfitout<-as.matrix(bfit)
+
+mean <- apply(bfitout,2,mean)
+sd <- apply(bfitout,2,sd)
+```
+```{r}
+names.vec <- c('intercept', names(data.numeric))
+```
+
+```{r}
+for (i in 1:87)  {
+  plot(density(bfitout[,i]), xlab='betai',main= names.vec[i]) 
+  abline(v = 0)
+}
+```
+
+
+I can perform 128 univariate t-test on the distribution a posteriori of beta_i to see how much of them are significantly different from zero:
+```{r}
+pval <- numeric(dim(bfitout)[2])
+for (i in 1:dim(bfitout)[2]) {
+  pval[i] <- t.test(bfitout[,i])$p.value
+}
+
+length(which(pval > 0.05))
+```
+#### DATASET DI CARLO
+
+Tengo le colonne che hanno la maggiore correlazione con il nostro output
+```{r}
+tfidf <- read.csv('dataset/tfidf_red.csv')
+```
+```{r}
+data.n <- tfidf[, 1:50]
+whi <- rep(1, 50)
+for (j in 1:50) {
+  if (sum (as.vector(data.n[,j] == 0)) == 2000 ) {
+    whi[j] <- 0
+  }
+    
+}
+```
+Ho creato un vettore whi che contiene degli 1 in corrispondenza delle colonne che voglio tenere
+```{r}
+length(which(whi == 1))
+data.numeric <- data.n[, which(whi == 1)]
+
+```
+
+```{r}
+library(MCMCpack)
+```
+Preparo le matrici
+```{r}
+Y <- tfidf[,51]
+X <- (cbind(1, data.numeric))
+X <- as.matrix(X)
+```
+Fisso la prior su beta
+```{r}
+beta00=rep(0, dim(X)[2]) 
+c0=50 #la prior ha un peso dell'1% rispetto al campione
+```
+Faccio andare il modello PROBIT 
+```{r}
+P0=t(X)%*%X/c0
+
+bfit <- MCMCprobit(Y ~ as.matrix(data.numeric), b0=beta00, B0=P0,marginal.likelihood='Chib95')
+```
+```{r}
+bfitout<-as.matrix(bfit)
+mean <- apply(bfitout,2,mean)
+sd <- apply(bfitout,2,sd)
+names.vec <- c('intercept', names(data.numeric))
+```
+
+```{r}
+x <- density(bfitout[,which(names.vec == 'love')])
+y <- density(bfitout[,which(names.vec == 'bad')])
+x11()
+par(mfrow = c(1,2))
+plot(x, xlab = '', main = '') 
+plot(y, xlab = '', main = '') 
+```
+
+
+```{r}
+for (i in 1:length(names.vec))  {
+  plot(density(bfitout[,i]), xlab='betai',main= names.vec[i]) 
+  abline(v = 0)
+}
+```
+
+## plot of the mcmc beta draws (only the first 10)
+
+```{r}
+for (i in 1:10) {
+  plot(bfitout[,i], type = 'l')
+}
+```
+
+## errore del modello 1: aper
+
+
+```{r}
+fitted <- as.vector(pnorm(X %*% mean))
+treshold_grid <- c(0.3,0.4,0.5,0.6)
+
+aper <- NULL
+for (i in 1:length(treshold_grid)) {
+  our_result = ifelse(fitted >treshold_grid[i] ,1,0)
+  tab <- table(class.true= Y, class.assigned=our_result)
+  aper[i] <- (tab[1,1] + tab[2,2])/2000
+}
+
+aper
+
+```
+```{r}
+our_result = ifelse(fitted > 0.5 ,1,0)
+table(class.true= Y, class.assigned=our_result)
+aper <- (tab[1,1] + tab[2,2])/2000
+aper
+```
+
+```{r}
+err_mean <- NULL
+for (i in 1:10000) {
+  err <- Y - pnorm(bfitout[i,] * t(X))
+  err_mean[i] <- mean(err)
+}
+```
+
+```{r}
+plot(density(err_mean)) #top, distribuito intorno allo zero
+```
+
